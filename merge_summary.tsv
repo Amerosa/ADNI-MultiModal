@@ -1,0 +1,11 @@
+pipeline_name	group_id	atlas_id	regions_number	first_column_name	last_column_name	first_column_index	last_column_index
+t1-volume	group-MultiMode	T1w_space-AAL2_map-graymatter	121	group-MultiMode_T1w_space-AAL2_map-graymatter_ROI-0	group-MultiMode_T1w_space-AAL2_map-graymatter_ROI-120	66	186
+t1-volume	group-MultiMode	T1w_space-AICHA_map-graymatter	386	group-MultiMode_T1w_space-AICHA_map-graymatter_ROI-0	group-MultiMode_T1w_space-AICHA_map-graymatter_ROI-385	187	572
+t1-volume	group-MultiMode	T1w_space-Hammers_map-graymatter	69	group-MultiMode_T1w_space-Hammers_map-graymatter_ROI-0	group-MultiMode_T1w_space-Hammers_map-graymatter_ROI-68	573	641
+t1-volume	group-MultiMode	T1w_space-LPBA40_map-graymatter	57	group-MultiMode_T1w_space-LPBA40_map-graymatter_ROI-0	group-MultiMode_T1w_space-LPBA40_map-graymatter_ROI-56	642	698
+t1-volume	group-MultiMode	T1w_space-Neuromorphometrics_map-graymatter	143	group-MultiMode_T1w_space-Neuromorphometrics_map-graymatter_ROI-0	group-MultiMode_T1w_space-Neuromorphometrics_map-graymatter_ROI-142	699	841
+pet-volume	group-MultiMode	task-rest_acq-fdg_pet_space-AAL2_suvr-pons	121	group-MultiMode_task-rest_acq-fdg_pet_space-AAL2_suvr-pons_ROI-0	group-MultiMode_task-rest_acq-fdg_pet_space-AAL2_suvr-pons_ROI-120	842	962
+pet-volume	group-MultiMode	task-rest_acq-fdg_pet_space-AICHA_suvr-pons	386	group-MultiMode_task-rest_acq-fdg_pet_space-AICHA_suvr-pons_ROI-0	group-MultiMode_task-rest_acq-fdg_pet_space-AICHA_suvr-pons_ROI-385	963	1348
+pet-volume	group-MultiMode	task-rest_acq-fdg_pet_space-Hammers_suvr-pons	69	group-MultiMode_task-rest_acq-fdg_pet_space-Hammers_suvr-pons_ROI-0	group-MultiMode_task-rest_acq-fdg_pet_space-Hammers_suvr-pons_ROI-68	1349	1417
+pet-volume	group-MultiMode	task-rest_acq-fdg_pet_space-LPBA40_suvr-pons	57	group-MultiMode_task-rest_acq-fdg_pet_space-LPBA40_suvr-pons_ROI-0	group-MultiMode_task-rest_acq-fdg_pet_space-LPBA40_suvr-pons_ROI-56	1418	1474
+pet-volume	group-MultiMode	task-rest_acq-fdg_pet_space-Neuromorphometrics_suvr-pons	143	group-MultiMode_task-rest_acq-fdg_pet_space-Neuromorphometrics_suvr-pons_ROI-0	group-MultiMode_task-rest_acq-fdg_pet_space-Neuromorphometrics_suvr-pons_ROI-142	1475	1617
