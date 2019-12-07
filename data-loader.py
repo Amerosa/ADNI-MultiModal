@@ -1,3 +1,4 @@
+import argparse
 import os
 import glob
 import pandas as pd
@@ -5,6 +6,7 @@ import numpy as np
 import nibabel as nib 
 import matplotlib.pyplot as plt
 from torch.utils.data import Dataset, random_split, DataLoader
+from torchvision.utils import make_grid
 from torchvision import transforms, models
 import torchvision
 import torch
@@ -12,7 +14,15 @@ from torch import nn, optim
 import fnmatch
 import copy
 import time
+from PIL import Image
 #from image_slices_viewer import IndexTracker
+
+
+parser = argparse.ArgumentParser(description='ADNI Dataset Training')
+parser.add_argument('caps', metavar='DIR', help='Folder that contains CAPS subjects compliant dataset')
+parser.add_argument('tsv', metavar='FILE', help='File of the merged tsv files created by clinica pipeline')
+
+args = parser.parse_args()
 
 #TODO Needo to fix the file that this comes from
 #https://matplotlib.org/gallery/animation/image_slices_viewer.html
@@ -59,33 +69,6 @@ def view_full_image(sample):
     fig.canvas.mpl_connect('scroll_event', tracker.onscroll)
     plt.show()
 
-#sample_path = "../caps_dir/subjects/sub-ADNI002S0295/ses-M00/t1/spm/segmentation/normalized_space"
-#sample_image = "sub-ADNI002S0295_ses-M00_T1w_segm-graymatter_space-Ixi549Space_modulated-off_probability.nii.gz"
-#images = glob.glob(root)
-#example = os.path.join(sample_path, sample_image)
-#image = nib.load(example)
-#header = image.header
-#print(header)
-
-#image_data = image.get_fdata()
-#print(image_data.shape)
-
-#fig, ax = plt.subplots(1,1)
-#tracker = IndexTracker(ax, image_data)
-#fig.canvas.mpl_connect('scroll_event', tracker.onscroll)
-#plt.show()
-
-
-#plt.imshow(image_data[:,:,60], cmap="gray")
-#plt.show()
-
-
-#adni_merge.set_index['participant']    
-def convert_subjects_format(s):
-    s = s[8:]
-    s = s[:3] + '_' + s[3] + '_' + s[4:]
-    return s
-
 label_to_num = {"CN":0, "AD":1, "LMCI":2}
 num_to_label = {0:"CN", 1:"AD", 2:"LMCI"}
 
@@ -99,18 +82,7 @@ class GreymatterDataset(Dataset):
         self.paths = make_paths(root_dir, pattern)
         self.paths.sort()
 
-        #This is turing the master list of subjects into a dict with the labels
-        #adni_merge = pd.read_csv('comprehensive_study.csv')
-        #adni_merge = adni_merge[['Subject', 'Group']]
-        #adni_merge.drop_duplicates(inplace=True)
-        #adni_merge = pd.Series(adni_merge['Group'].values, index=adni_merge['Subject']).to_dict()
-
-        #This is only the patients used and we are mathing it with the master list to generate labels
-        #patients = pd.read_csv('subject_visit.csv', sep='\t')
-        #patients = patients['participant_id']
-        #patients = patients.apply(convert_subjects_format)
-
-        classes = pd.read_csv('../merge-tsv.tsv', sep='\t')
+        classes = pd.read_csv(args.tsv, sep='\t')
         classes = classes['diagnosis_bl'].tolist()
         #print(classes)
 
@@ -134,17 +106,38 @@ class GreymatterDataset(Dataset):
 
         image = nib.load(self.paths[path_idx])
         image = image.get_fdata()
-        image = np.expand_dims(image, axis=0)
-
-        #print(self.paths[path_idx], self.labels[path_idx], "slice:", s)
+        print("Original Shape", image.shape)
+        image = image[:,s,:]
+        #image = np.expand_dims(image, axis=0)
         
-        return (image[:,:,s,:], self.labels[path_idx])
+        image = Image.fromarray(image)
+        #plt.imshow(image)
+        #plt.show()
+
+        print("Convert to PIL", image.size)
+
+        if self.transform:
+            image = self.transform(image)
+        
+        print("Post Transformation", image.shape)
+
+        print("Before Sample", image.shape)
+
+        return (image, self.labels[path_idx])
 
     def print_paths(self):
         for i, path in enumerate(self.paths):
             print(path, num_to_label[self.labels[i]])
 
-dataset= GreymatterDataset('../caps_dir/subjects', transform=transforms.ToTensor())
+
+transform = transforms.Compose(
+    [
+        transforms.Resize((224,224), interpolation=0),
+        transforms.ToTensor()
+    ])
+
+
+dataset= GreymatterDataset(args.caps, transform=transform)
 
 #sample, label = dataset.__getitem__(256789)
 
@@ -154,6 +147,7 @@ dataset= GreymatterDataset('../caps_dir/subjects', transform=transforms.ToTensor
 train_size = int(0.6*len(dataset))
 val_size = test_size = int(0.2*len(dataset))
 
+#TODO Make sure to set a random seed that way I have the same splits each time!
 train_dataset, test_dataset, val_dataset = random_split(dataset, [train_size, test_size, val_size])
 
 dataloaders = {
@@ -233,7 +227,7 @@ def train_model(model, criterion, optimizer, num_epochs=100):
     model.load_state_dict(best_model_wts)
     return model
 
-transform = transforms.Compose(
+""" transform = transforms.Compose(
     [transforms.ToTensor(),
      transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))])
 
@@ -248,7 +242,7 @@ testloader = torch.utils.data.DataLoader(testset, batch_size=4,
                                          shuffle=False, num_workers=2)
 
 classes = ('plane', 'car', 'bird', 'cat',
-           'deer', 'dog', 'frog', 'horse', 'ship', 'truck')
+           'deer', 'dog', 'frog', 'horse', 'ship', 'truck') """
 
 
 
@@ -296,24 +290,31 @@ def show_image_batch(sample, rows, cols ):
     plt.show()
 
 
-#samples = [dataset.__getitem__(i) for i in range(0,141,10) ]
-# for sample in samples :
-#     image, _ = sample
-#     plt.imshow(image[0,:,:])
-#     plt.show()
-#samples = [dataset.__getitem__(i) for i in range(290)]
-
-
-
 model_ft = models.resnet18(pretrained=False, progress=True)
 #model_ft.features._modules['0'] = nn.Conv2d(1, 64, kernel_size=(3,3), stride=(1,1), padding=(1,1))
 #model_ft.classifier._modules['6'] = nn.Linear(4096, 10)
-model_ft.conv1 = nn.Conv2d(1, 64, kernel_size=(7, 7), stride=(2, 2), padding=(3, 3), bias=False)
-model_ft.fc = nn.Linear(in_features=512, out_features=3, bias=True)
+#model_ft.conv1 = nn.Conv2d(1, 64, kernel_size=(7, 7), stride=(2, 2), padding=(3, 3), bias=False)
+#model_ft.fc = nn.Linear(in_features=512, out_features=3, bias=True)
+sample, labels = next(iter(dataloaders['train']))
 
+def show_batch(img_batch, columns=8, rows=4):
+    assert columns*rows == img_batch.shape[0], "Your columns and rows do not match up to the number of images in your batch!"
+    fig=plt.figure(figsize=(20, 20))
+    for i in range(columns*rows):
+        fig.add_subplot(rows, columns, i+1)
+        plt.imshow(sample[i,0,:,:])
+    plt.show()
 
+show_batch(sample)
 
-model_ft = model_ft.to(device)
+#out = make_grid(sample)
+#out = out.numpy().transpose((1, 2, 0))
+#print(sample.shape)
+
+#plt.imshow(out)
+#plt.show()
+
+""" model_ft = model_ft.to(device)
 
 criterion = nn.CrossEntropyLoss()
 
@@ -331,6 +332,6 @@ with torch.no_grad():
         total += labels.size(0)
         correct += (preds == labels).sum().item()
 
-print(f"Accuracy of the netowrk is {(correct/total) * 100}")
+print(f"Accuracy of the netowrk is {(correct/total) * 100}") """
 
 
