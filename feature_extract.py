@@ -150,7 +150,7 @@ with torch.no_grad():
 
         print(f'{mode}: {features.shape}')
         print("Saving features in file...")
-        torch.save(features, Path('./features/' + mode + '-feautres.pt'))
+        torch.save(features, Path('./features/' + mode + '-features.pt'))
         print("File Saved")
 
 print("Concat the labels")

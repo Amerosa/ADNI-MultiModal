@@ -73,16 +73,18 @@ def train(model, criterion, optimizer, num_epochs=25):
                 
                 inputs = inputs.transpose(1,3)
                 inputs = inputs.to(device)
+                #labels = labels.squeeze(1)
                 labels = labels.to(device)
 
                 optimizer.zero_grad()
 
                 with torch.set_grad_enabled(phase == 'train'):
-                    print(inputs.shape)
+                    #print(inputs.shape)
+                    #print(labels.shape)
                     outputs = model(inputs)
-                    print(outputs.shape)
+                    #print(outputs)
                     outputs = outputs.reshape((outputs.size(0), 3))
-                    print(outputs.shape)
+                    #print(outputs)
                     #print(labels.shape)
                     _, preds = torch.max(outputs, 1)
                     #print(preds.shape)
@@ -112,13 +114,32 @@ def train(model, criterion, optimizer, num_epochs=25):
     print()
     time_elapsed = time.time() - since
     print('Training completed in {:.0f}m {:0f}s'.format(time_elapsed // 60, time_elapsed % 60))
-    print('Best val acc: {:4f}'.format(best_acc*100))
+    print('Best val acc: {:.4f}'.format(best_acc*100))
 
     model.load_state_dict(best_model_wts)
-    torch.save(model, 'features/baseline.pt')
+    
     return model
 
+def testing(model):
+    running_corrects = 0.0
+    with torch.no_grad():
+        for batch_idx, (inputs, labels) in enumerate(dataloaders['test']):
+            inputs = inputs.transpose(1,3)
+            inputs = inputs.to(device)
+            labels = labels.to(device)
+            outputs = model(inputs)
+            outputs = outputs.reshape((outputs.size(0), 3))
+            _, preds = torch.max(outputs, 1)
 
-model = train(net, criterion, optimizer, 1)
+            running_corrects += torch.sum(preds == labels)
+            #print(running_corrects)
+    print()
+    print('Test Acc: {:.4f} '.format( (running_corrects / dataset_sizes['test'])*100 ))
+
+#print(dataset_sizes['test'])
+trained_model = train(net, criterion, optimizer, 100)
+#torch.save(trained_model, 'features/baseline.pt')
+testing(trained_model)
+
 
 
