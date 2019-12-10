@@ -117,7 +117,7 @@ class AdniDataset(Dataset):
     
 
         image = nib.load(self.paths[path_idx])
-        #print(self.paths[path_idx])
+        print(f'{self.paths[path_idx]} \t {self.labels[path_idx]}')
         image = image.get_fdata()
         #print("Original Shape", image.shape)
         image = image[:,s,:]
@@ -265,7 +265,7 @@ def show_image_batch(sample, rows, cols ):
 
 
 #Get a basic pretrained model for feature extraction by freezing the conv weights
-model_ft = models.resnet18(pretrained=True, progress=True)
+#model_ft = models.resnet18(pretrained=True, progress=True)
 
 
 #model_ft.features._modules['0'] = nn.Conv2d(1, 64, kernel_size=(3,3), stride=(1,1), padding=(1,1))
@@ -284,9 +284,9 @@ def show_batch(img_batch, columns=8, rows=4):
     plt.show()
 
 #Taking the resnet and removing last fc layer that way we can extract features for each mode
-ftr_extactor = nn.Sequential( *list(model_ft.children())[:-1] ) 
-for param in ftr_extactor.parameters():
-    param.requires_grad = False
+# ftr_extactor = nn.Sequential( *list(model_ft.children())[:-1] ) 
+# for param in ftr_extactor.parameters():
+#     param.requires_grad = False
 
 
 
@@ -329,22 +329,22 @@ print(f"Accuracy of the netowrk is {(correct/total) * 100}") """
 #msample, mlabels = next(iter(mri_dataloaders['train']))
 #psample, plabels = next(iter(pet_dataloaders['train']))
 
-with torch.no_grad():
+# with torch.no_grad():
 
-    for i, (sample,label) in enumerate(mri_dataloaders['train']):
-        if i == 2:
-            break
+#     for i, (sample,label) in enumerate(mri_dataloaders['train']):
+#         if i == 2:
+#             break
 
-        print(label)
-        temp = ftr_extactor(sample)
-        torch.save(temp, './features/temp.pt')
-        #pt = ftr_extactor(psample)
-        #temp = torch.cat((mr, pt), 1)
-        print(temp.shape)
+#         print(label)
+#         temp = ftr_extactor(sample)
+#         torch.save(temp, './features/temp.pt')
+#         #pt = ftr_extactor(psample)
+#         #temp = torch.cat((mr, pt), 1)
+#         print(temp.shape)
 
 
-newish = torch.load('./features/temp.pt')
-print(newish.shape)
+# newish = torch.load('./features/temp.pt')
+# print(newish.shape)
 
 
 #show_batch(msample)
