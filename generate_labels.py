@@ -7,6 +7,7 @@ args = parser.parse_args()
 
 master = pd.read_csv(args.tsv, sep='\t', usecols=['participant_id','session_id','diagnosis_bl','diagnosis', 'age'])
 master = master.sort_values(by=['participant_id','session_id'])
+master.dropna(subset=['diagnosis'], inplace=True)
 master.reset_index(drop=True, inplace=True)
 
 
@@ -23,7 +24,7 @@ for i, row in enumerate(master.itertuples()):
         else:
             master.at[i, 'diagnosis'] = 'nMCI'
 
-#print(master.sort_values(by=['participant_id','session_id']))
+print(pd.isna(master['diagnosis']).any())
 
-if master.to_csv('./labels.tsv', sep='\t', index=False):
-    print("File saved successfully!")
+#if master.to_csv('./labels.tsv', sep='\t', index=False):
+    #print("File saved successfully!")
