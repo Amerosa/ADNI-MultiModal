@@ -28,7 +28,7 @@ from PIL import Image
 
 parser = argparse.ArgumentParser(description='ADNI Dataset Training')
 parser.add_argument('caps', metavar='DIR', help='Folder that contains CAPS subjects compliant dataset')
-parser.add_argument('tsv', metavar='FILE', help='File of the merged tsv files created by clinica pipeline')
+parser.add_argument('tsv', metavar='FILE', help='Labels')
 
 args = parser.parse_args()
 
@@ -41,7 +41,10 @@ def make_paths(root_dir, pattern):
     
     return file_paths
 
-label_to_num = {"CN":0, "AD":1, "LMCI":2}
+label_to_num = {'CN':0, 'nMCI':1, 'cMCI':2, 'AD':3}
+
+
+#TODO I can bundle the modes into one dataset object instead of having two of them currently
 class AdniDataset(Dataset):
     """Basic class for ADNI Caps compliant directory structure,
     just change the pattern for which type of image modality you want"""
@@ -64,15 +67,12 @@ class AdniDataset(Dataset):
         self.paths = make_paths(root_dir, pattern)
         self.paths.sort()
 
-        classes = pd.read_csv(args.tsv, sep='\t')
-        classes = classes['diagnosis_bl'].tolist()
-        #print(classes)
+        classes = pd.read_csv(args.tsv, sep='\t', usecols=['diagnosis'])
 
         self.labels = []
-        for cl in classes:
+        for cl in classes['diagnosis']:
             self.labels.append(label_to_num[cl])
         
-        self.root_dir = root_dir
         self.transform = transform
 
     def __len__(self):
@@ -102,7 +102,7 @@ class AdniDataset(Dataset):
         if self.transform:
             image = self.transform(image)
 
-        image = image.repeat_interleave(3, dim=0)
+        image = image.repeat_interleave(3, dim=0) #Convert grayscale to "RGB" by copying values across 3 dim
         #print("Post Transformation", image.shape)
 
         #print("Before Sample", image.shape)
@@ -129,9 +129,13 @@ device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 extractor = models.resnet18(pretrained=True, progress=True)
 extractor = nn.Sequential( *list(extractor.children())[:-1] ) 
 extractor = extractor.to(device)
-
 extractor.eval()
+
+if not Path('./features').is_dir():
+    os.mkdir(Path('./features'))
+
 print(device)
+
 with torch.no_grad():
     for mode in ['mri', 'pet']:
         print(f"Extracting {mode} features")

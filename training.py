@@ -44,7 +44,7 @@ class FullyConnectedClf(nn.Module):
     def __init__(self):
         super(FullyConnectedClf, self).__init__()
         self.fc1 = nn.Linear(1024, 512)
-        self.fc2 = nn.Linear(512, 3)
+        self.fc2 = nn.Linear(512, 4)
 
     def forward(self , x):
         x = F.relu(self.fc1(x))
@@ -83,7 +83,7 @@ def train(model, criterion, optimizer, num_epochs=25):
                     #print(labels.shape)
                     outputs = model(inputs)
                     #print(outputs)
-                    outputs = outputs.reshape((outputs.size(0), 3))
+                    outputs = outputs.reshape((outputs.size(0), 4))
                     #print(outputs)
                     #print(labels.shape)
                     _, preds = torch.max(outputs, 1)
@@ -128,7 +128,7 @@ def testing(model):
             inputs = inputs.to(device)
             labels = labels.to(device)
             outputs = model(inputs)
-            outputs = outputs.reshape((outputs.size(0), 3))
+            outputs = outputs.reshape((outputs.size(0), 4))
             _, preds = torch.max(outputs, 1)
 
             running_corrects += torch.sum(preds == labels)
