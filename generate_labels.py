@@ -10,7 +10,6 @@ master = master.sort_values(by=['participant_id','session_id'])
 master.dropna(subset=['diagnosis'], inplace=True)
 master.reset_index(drop=True, inplace=True)
 
-
 threshold = 3.0 #36 months equals 3 years can adjust to something else
 for i, row in enumerate(master.itertuples()):
     
@@ -24,7 +23,5 @@ for i, row in enumerate(master.itertuples()):
         else:
             master.at[i, 'diagnosis'] = 'nMCI'
 
-print(pd.isna(master['diagnosis']).any())
-
-#if master.to_csv('./labels.tsv', sep='\t', index=False):
-    #print("File saved successfully!")
+if master.to_csv('./labels.tsv', sep='\t', index=False):
+    print("File saved successfully!")
