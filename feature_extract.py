@@ -152,7 +152,7 @@ def train(model, criterion, optimizer, dataloader, num_epochs=100):
                 #print('Batch {} done...'.format(batch_idx))
 
             epoch_loss = running_loss / dataset_sizes[phase]*100
-            epoch_acc = running_corrects / dataset_sizes[phase]*100
+            epoch_acc = running_corrects.double() / dataset_sizes[phase]*100
 
             print('{} Loss: {:.4f} Acc: {:.4f}'.format(phase, epoch_loss, epoch_acc))
 
