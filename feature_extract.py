@@ -119,7 +119,7 @@ def train(model, criterion, optimizer, dataloader, num_epochs=100):
     best_acc = 0.0
 
     for epoch in range(num_epochs):
-        print('Epoch {}'.format(epoch))
+        print('Epoch {}'.format(epoch+1))
 
         for phase in ['train', 'val']:
 
@@ -261,14 +261,15 @@ pet_model.fc = nn.Linear(num_ftrs, 4)
 
 if args.training:
 
+    mri_model = mri_model.to(device)
+    pet_model = pet_model.to(device)
+    
     criterion = nn.CrossEntropyLoss()
     mri_optimizer = optim.Adam(mri_model.parameters())
     pet_optimizer = optim.Adam(pet_model.parameters())
 
-    mri_model = mri_model.to(device)
-    mri_model = train(mri_model, criterion, mri_optimizer, mri_dataloader, num_epochs=100)
-    pet_model = pet_model.to(device)
-    pet_model = train(pet_model, criterion, pet_optimizer, pet_dataloader, num_epochs=100)
+    mri_model = train(mri_model, criterion, mri_optimizer, mri_dataloader, num_epochs=25)
+    pet_model = train(pet_model, criterion, pet_optimizer, pet_dataloader, num_epochs=25)
 
 mri_model = nn.Sequential( *list(mri_model.children())[:-1] )
 mri_model = mri_model.to(device)
