@@ -213,10 +213,10 @@ def serialize_labels():
 
             acc = torch.cat((acc,labels), 0)       
 
-    print(f'Labels: {acc.shape}')
-    print("Saving labels in file...")
-    torch.save(acc, Path('./features/labels.pt'))
-    print("File Saved")
+        print(f'Labels: {acc.shape}')
+        print("Saving labels in file...")
+        torch.save(acc, Path('./features/labels.pt'))
+        print("File Saved")
 
 transform = transforms.Compose(
     [
