@@ -15,7 +15,7 @@ for i, row in enumerate(master.itertuples()):
     
     if row.diagnosis == 'MCI':
         temp = master.loc[master['participant_id'] == row.participant_id]
-        #temp = temp.loc[temp['age'] <= row.age + 3]
+        temp = temp.loc[temp['age'] <= row.age + 3]
 
         print(i, temp)
         if temp['diagnosis'].isin(['AD']).any():
