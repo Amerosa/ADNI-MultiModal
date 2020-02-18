@@ -4,41 +4,26 @@ import torch.nn as nn
 import torch.nn.functional as F
 import torch.optim as optim
 import time
-import copy 
+import copy
+import argparse
+from pathlib import Path
 
 device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
 class TensorDataset(torch.utils.data.TensorDataset):
     def __init__(self, mri_features, pet_features, labels):
         super(TensorDataset).__init__()
-        self.mri = mri_features
-        self.pet = pet_features
-        self.labels = labels
+        self.mri = mri_features.squeeze() #[samples x features x 1 x 1] => [samples x features]
+        self.pet = pet_features.squeeze() 
+        self.labels = labels #[samples x 1]
 
     def __len__(self):
         return self.labels.shape[0]
     
     def __getitem__(self, idx):
-
-        #When indexing tensor we get a size [512,1,1]  instead of 4 dim which is why we cat on dim=0 instead of 1                  
+        #[1 x feautres]                  
         temp = torch.cat((self.mri[idx], self.pet[idx]), 0) 
         return (temp, self.labels[idx])
-
-dataset = TensorDataset( torch.load('features/mri-features.pt'), torch.load('features/pet-features.pt'), torch.load('features/labels.pt'))
-
-train_size = int(0.6*len(dataset))
-val_size = test_size = int(0.2*len(dataset))
-
-dataset_sizes = { 'train': train_size, 'val': val_size, 'test': test_size }
-
-torch.random.manual_seed(42)
-train_set, val_set, test_set = random_split(dataset, [train_size, val_size, test_size])
-
-dataloaders = {
-            'train': DataLoader(train_set, batch_size=32, shuffle=False), #Using random split to shuffle instead
-            'val': DataLoader(val_set, batch_size=32, shuffle=False),
-            'test': DataLoader(test_set, batch_size=32, shuffle=False)
-}
 
 class FullyConnectedClf(nn.Module):
     def __init__(self):
@@ -52,10 +37,16 @@ class FullyConnectedClf(nn.Module):
    
         return x 
 
-net = FullyConnectedClf().to(device)
+naive_clf = nn.Sequential(
+            nn.Linear(1024, 512),
+            nn.ReLU(),
+            nn.Linear(512,4)           
+)
+
+naive_clf.to(device)
 
 criterion = nn.CrossEntropyLoss()
-optimizer = optim.Adam(net.parameters(), lr=0.001)
+optimizer = optim.Adam(naive_clf.parameters(), lr=0.001, weight_decay=0.01)
 
 def train(model, criterion, optimizer, num_epochs=25):
     since = time.time()
@@ -71,7 +62,7 @@ def train(model, criterion, optimizer, num_epochs=25):
 
             for batch_idx, (inputs,labels) in enumerate(dataloaders[phase]):    
                 
-                inputs = inputs.transpose(1,3)
+                #inputs = torch.t(inputs)
                 inputs = inputs.to(device)
                 #labels = labels.squeeze(1)
                 labels = labels.to(device)
@@ -82,9 +73,9 @@ def train(model, criterion, optimizer, num_epochs=25):
                     #print(inputs.shape)
                     #print(labels.shape)
                     outputs = model(inputs)
-                    #print(outputs)
-                    outputs = outputs.reshape((outputs.size(0), 4))
-                    #print(outputs)
+                    #print(outputs.shape)
+                    #outputs = outputs.reshape((outputs.size(0), 4))
+                    #print(outputs.shape)
                     #print(labels.shape)
                     _, preds = torch.max(outputs, 1)
                     #print(preds.shape)
@@ -124,11 +115,11 @@ def testing(model):
     running_corrects = 0.0
     with torch.no_grad():
         for batch_idx, (inputs, labels) in enumerate(dataloaders['test']):
-            inputs = inputs.transpose(1,3)
+            #inputs = inputs.transpose(1,3)
             inputs = inputs.to(device)
             labels = labels.to(device)
             outputs = model(inputs)
-            outputs = outputs.reshape((outputs.size(0), 4))
+            #outputs = outputs.reshape((outputs.size(0), 4))
             _, preds = torch.max(outputs, 1)
 
             running_corrects += torch.sum(preds == labels)
@@ -137,9 +128,33 @@ def testing(model):
     print('Test Acc: {:.4f} '.format( (running_corrects / dataset_sizes['test'])*100 ))
 
 #print(dataset_sizes['test'])
-trained_model = train(net, criterion, optimizer, 100)
+#trained_model = train(net, criterion, optimizer, 100)
 #torch.save(trained_model, 'features/baseline.pt')
+#testing(trained_model)
+parser = argparse.ArgumentParser()
+parser.add_argument('features', metavar='DIR', help='Directory of the feature tensors extracted')
+parser.add_argument('labels', metavar='DIR', help='Directory of the labels')
+
+args = parser.parse_args()
+ft_dir = Path(args.features)
+lb_dir = Path(args.labels)
+dataloaders = {}
+
+#TODO Super messy way to load all the data, may need to fix this in the future!
+train_set = TensorDataset(torch.load(ft_dir / 'mri-train-features.pt'), torch.load(ft_dir / 'pet-train-features.pt'), torch.load(lb_dir / 'train-labels.pt') )
+val_set   = TensorDataset(torch.load(ft_dir / 'mri-val-features.pt'), torch.load(ft_dir / 'pet-val-features.pt'), torch.load(lb_dir / 'val-labels.pt') )
+test_set  = TensorDataset(torch.load(ft_dir / 'mri-test-features.pt'), torch.load(ft_dir / 'pet-test-features.pt'), torch.load(lb_dir / 'test-labels.pt') )
+
+dataset_sizes = { 'train': len(train_set), 'val'  : len(val_set), 'test' : len(test_set) }
+
+dataloaders = {
+                'train' : DataLoader(train_set, batch_size=128, shuffle=False),
+                'val' : DataLoader(val_set, batch_size=128, shuffle=False),
+                'test' : DataLoader(test_set, batch_size=128, shuffle=False)
+}
+
+#sample, label = next(iter(dataloaders['test']))
+#print(sample.shape, label.shape)
+
+trained_model = train(naive_clf, criterion, optimizer, 100)
 testing(trained_model)
-
-
-
