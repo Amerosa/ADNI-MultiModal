@@ -7,6 +7,8 @@ from pathlib import Path
 from skimage.measure import shannon_entropy
 import glob
 import argparse
+from numpy.random import default_rng
+
 
 parser = argparse.ArgumentParser(description='Create a subset of data basing slices off entropy significance.')
 parser.add_argument('threshold', type=int, help='The amount of important slices you want from the volume')
@@ -31,8 +33,9 @@ def shannon(image):
     entropies = sorted(entropies, key=lambda x: x[0], reverse=True)
     return list(zip(*entropies[:args.threshold]))
 
-def random_entropy(shape):
-    return list(np.random.randint(shape, size=args.threshold)) 
+def random_entropy(num_slices):
+    rng = default_rng() #Need this for non replcement of ints 
+    return list(rng.choice(num_slices, size=args.threshold, replace=False)) 
 
 def save_images(mri_destination, pet_destination, mri_image_path, pet_image_path):
    
@@ -40,7 +43,7 @@ def save_images(mri_destination, pet_destination, mri_image_path, pet_image_path
     pet_image = get_image(pet_image_path)
 
     if args.random:
-        indicies = random_entropy(mri_image.shape[1]) #Axial slice 
+        indicies = random_entropy(mri_image.shape[1] - 1) #145 slices remember to sub 1 for indicies
     else:
         indicies = list(shannon(mri_image)[1])
 

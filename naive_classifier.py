@@ -7,8 +7,8 @@ import torch.optim as optim
 from PIL import Image
 from torchvision import transforms, models
 from sklearn.model_selection import StratifiedShuffleSplit
-from sklearn.model_selection import cross_val_predict
-from sklearn.metrics import confusion_matrix, precision_recall_fscore_support, accuracy_score
+from sklearn.model_selection import cross_val_score, cross_val_predict
+from sklearn.metrics import confusion_matrix, classification_report, accuracy_score
 from sklearn.svm import LinearSVC
 import numpy as np 
 import matplotlib.pyplot as plt
@@ -25,6 +25,7 @@ class ADNI(Dataset):
         self.class_to_num = {'CN':0, 'nMCI':1, 'cMCI':2, 'AD':3}
         
     def __len__(self):
+        #print(self.paths)
         return len(self.paths)
     
     def __getitem__(self, index):
@@ -67,7 +68,8 @@ def extract_features(model, dataloader):
         for idx, batch in enumerate(dataloader):               
             mri_inputs = batch["mri"].to(device)
             pet_inputs = batch["pet"].to(device)
-
+            #print("Batch: ", idx, "Mri shape: ", mri_inputs.shape, "Pet shape: ", pet_inputs.shape)
+            #print(torch.max(mri_inputs))
             mri_outputs = model(mri_inputs).squeeze()
             pet_outputs = model(pet_inputs).squeeze()
 
@@ -76,7 +78,7 @@ def extract_features(model, dataloader):
             
             labels.append(batch["class"])
 
-    print(len(features))
+    print("Features extracted!")
     return torch.cat(features, dim=0), torch.cat(labels, dim=0)  #Stack the list of accumulated batches of feautres into one big matrix to use for SVM
 
 device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
@@ -87,8 +89,12 @@ transform = transforms.Compose(
         transforms.ToTensor()
     ])
 
+print("Loading Dataset...")
 adni = ADNI("labels.tsv", "F:/temp/entropy_30", transform=transform)
-adni_loader = DataLoader(adni, batch_size=4, shuffle=False)
+
+#print("Length of the data set is: ", len(adni))
+
+adni_loader = DataLoader(adni, batch_size=64, shuffle=False)
 
 resnet = models.resnet18(pretrained=True, progress=True)
 num_ftrs = resnet.fc.in_features
@@ -97,19 +103,27 @@ resnet = nn.Sequential( *list(resnet.children())[:-1] ) #Remove the last fully c
 resnet = resnet.to(device)
 
 features, labels = extract_features(resnet, adni_loader)
+#print(features.shape)
+#print(labels.shape)
 features = features.cpu().numpy()
 labels = labels.cpu().numpy()
 
-clf = LinearSVC(dual=False)
+
+print("Classifying...")
+clf = LinearSVC(dual=False) # number of samples greater than the features so dual needs to be false as per scikits docs
 cv = StratifiedShuffleSplit(n_splits=10, test_size=0.2)
 #TODO corss val predict is not working becuase it only works on partitions?? Try stratified kfold instead 
-pred = cross_val_predict(clf, features, labels, cv=cv)
- 
-print("Accuracy: ", accuracy_score(labels, pred))
-print(precision_recall_fscore_support(labels, pred, average='samples'))
 
-cfm = confusion_matrix(labels, pred)
-plt.matshow(cfm)
-plt.show()
+scores = cross_val_score(clf, features, labels, cv=cv)
+
+print("Accuracy: %0.2f (+/- %0.2f)" % (scores.mean(), scores.std() * 2))
+
+#target_names = ["CN", "nMCI", "cMCI", "AD"]
+#print("Accuracy: ", accuracy_score(labels, pred))
+#print(classification_report(labels, pred, target_names=target_names))
+
+#cfm = confusion_matrix(labels, pred)
+#plt.matshow(cfm)
+#plt.show()
  
 
