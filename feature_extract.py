@@ -3,11 +3,11 @@ import os
 from pathlib import Path
 
 from torchvision import transforms, models
-from torch.utils.data import Dataset, random_split, DataLoader
+from torch.utils.data import Dataset, random_split, DataLoader, ConcatDataset
 from torch import nn
 import matplotlib.pyplot as plt
 import torch
-
+from  torch.optim import lr_scheduler
 import argparse
 import os
 import glob
@@ -26,100 +26,111 @@ import copy
 import time
 from PIL import Image
 
+from models.nets import *
+from collections import defaultdict
+
 parser = argparse.ArgumentParser(description='ADNI Dataset Training')
-parser.add_argument('caps', metavar='DIR', help='Folder that contains CAPS subjects compliant dataset')
+parser.add_argument('data', metavar='DIR', help='Folder that contains the dataset you want to use')
 parser.add_argument('tsv', metavar='FILE', help='Labels')
-parser.add_argument('--training', dest='training', action='store_true')
-parser.add_argument('--no-training', dest='training', action='store_false')
-parser.set_defaults(training=True)
 
 args = parser.parse_args()
 
-def make_paths(root_dir, pattern):
-    file_paths = []
-    for root, dirs, files in os.walk(root_dir, topdown=False):
-        for file in files:
-            if fnmatch.fnmatch(file, pattern):
-                file_paths.append( (os.path.join(root, file)) )
-    
-    return file_paths
+#TODO Need to fix the file path thingy so that it can accept a trailing \ otherwise the whole thing breaks 
+subset = args.data.split('\\')[-1]
+destination_dir = os.path.join('features', subset)
+model_destination = os.path.join('models', subset + '.pth')
 
-label_to_num = {'CN':0, 'nMCI':1, 'cMCI':2, 'AD':3}
+if not os.path.exists(destination_dir):
+    os.mkdir(destination_dir)
 
-#TODO I can bundle the modes into one dataset object instead of having two of them currently
-class AdniDataset(Dataset):
-    """Basic class for ADNI Caps compliant directory structure,
-    just change the pattern for which type of image modality you want"""
+print(f'Destination to save features is {destination_dir} and model weights will be saved in {model_destination}')
 
-    def __init__(self, root_dir, mode='mri', transform=None):
+class ADNI(Dataset):
+    def __init__(self, csv_path, root_dir, transform=None):
         
-        pattern = None
-
-        if mode == 'mri':
-            pattern = "*_T1w_segm-graymatter_space-Ixi549Space_modulated-on_fwhm-8mm_probability.nii.gz"
-        
-        if mode == 'pet':
-            pattern = "*_task-rest_acq-fdg_pet_space-Ixi549Space_suvr-pons_mask-brain_fwhm-8mm_pet.nii.gz"
-
-        assert pattern, "Bad pattern matching generation check modality!"
-
-        self.num_slices = 145
-        #pattern = "*_T1w_segm-graymatter_space-Ixi549Space_modulated-off_probability.nii.gz"
-        
-        self.paths = make_paths(root_dir, pattern)
-        self.paths.sort()
-
-        classes = pd.read_csv(args.tsv, sep='\t', usecols=['diagnosis'])
-
-        self.labels = []
-        for cl in classes['diagnosis']:
-            self.labels.append(label_to_num[cl])
-        
+        self.threshold = int(root_dir.replace('\\', '').split('_')[-1])
+        self.root = root_dir
+        self.csv = pd.read_csv(csv_path, sep='\t')
+        self.paths = self.make_paths()
         self.transform = transform
-
-    def __len__(self):
-        return len(self.paths) * self.num_slices
-
-    def __getitem__(self, idx):
-        if torch.is_tensor(idx):
-            idx = idx.tolist()
-
-        s = idx % self.num_slices
-        path_idx = idx // self.num_slices
-    
-
-        image = nib.load(self.paths[path_idx])
-        #print(f'{self.paths[path_idx]} \t {self.labels[path_idx]} \t {s}')
-        image = image.get_fdata()
-        #print("Original Shape", image.shape)
-        image = image[:,s,:]
-        #image = np.expand_dims(image, axis=0)
         
-        image = Image.fromarray(image)
-        #plt.imshow(image)
-        #plt.show()
-
-        #print("Convert to PIL", image.size)
-
-        if self.transform:
-            image = self.transform(image)
-
-        image = image.repeat_interleave(3, dim=0) #Convert grayscale to "RGB" by copying values across 3 dim
-        #print("Post Transformation", image.shape)
-
-        #print("Before Sample", image.shape)
-
-        return (image, self.labels[path_idx])
-
-def train(model, criterion, optimizer, dataloader, num_epochs=100):
+        self.class_to_num = {'CN':0, 'nMCI':1, 'cMCI':2, 'AD':3}
+        
+    def __len__(self):
+        #print(self.paths)
+        return len(self.paths)
     
+    def __getitem__(self, index):
+        
+        subject = self.csv.iloc[index//self.threshold]
+        
+        mri_image = Image.open(self.paths[index][0])
+        pet_image = Image.open(self.paths[index][1])
+        
+        
+        #Applyin transformations if any
+        #Then copying the grayscale image across 3 channels for Resenet
+        
+        if transform:
+            mri_image = self.transform(mri_image).repeat_interleave(3, dim=0)
+            pet_image = self.transform(pet_image).repeat_interleave(3, dim=0)
+        
+        return {"id": subject["participant_id"], 
+                "sess": subject["session_id"], 
+                "mri": mri_image, 
+                "pet": pet_image, 
+                "class": self.class_to_num[subject["diagnosis"]]}
+    
+    def make_paths(self):
+        all_paths = []
+        for root, dirs, files in os.walk(self.root):
+            for file in files:
+                all_paths.append(os.path.join(root, file))
+        all_paths = list(zip(*[iter(all_paths)]*self.threshold)) #Break into chunks of threshold size
+        mri_paths = [item for tup in all_paths[::2] for item in tup]
+        pet_paths = [item for tup in all_paths[1::2] for item in tup]
+        return list(zip(mri_paths, pet_paths))
+
+def naive_feature_extraction(dataloader):
+    model = ResnetNaive().to(device).eval()
+    features = defaultdict(list)
+    with torch.no_grad():
+        for idx, batch in enumerate(dataloader, start=1):               
+            mri_inputs, pet_inputs = batch["mri"].to(device), batch["pet"].to(device)
+            mri_outputs, pet_outputs = model(mri_inputs, pet_inputs)
+            
+            print(f'Batch: {idx:03d}, Mri shape: {mri_outputs.shape}, Pet shape: {pet_outputs.shape}')
+            
+            features['mri'].append(mri_outputs.squeeze().cpu())
+            features['pet'].append(pet_outputs.squeeze().cpu())
+            features['class'].append(batch["class"])
+            
+    print(f'Saving to, {destination_dir} ...')
+    features = { mode: torch.cat(feats, dim=0) for mode, feats in features.items() }
+
+    print(f"Mri features: {features['mri'].shape} Pet features: {features['pet'].shape} Labels: {features['class'].shape}")
+    
+    torch.save(features['mri'], os.path.join(destination_dir, 'naive_mri_features.pt'))
+    torch.save(features['pet'], os.path.join(destination_dir, 'naive_pet_features.pt'))
+    torch.save(features['class'], os.path.join(destination_dir, 'naive_labels.pt'))
+    print('Naive features have been extracted and saved!')
+    
+def train_multimodal(dataloader, num_epochs=25):
     since = time.time()
 
-    best_model_wts = copy.deepcopy(model.state_dict())
-    best_acc = 0.0
+    model = ResnetMultiModal().to(device)
+    criterion = nn.CrossEntropyLoss()
+    mri_optimizer = optim.SGD(model.mri.parameters(), lr=0.0001, weight_decay=0.01, momentum=0.9)
+    pet_optimizer = optim.SGD(model.pet.parameters(), lr=0.0001, weight_decay=0.01, momentum=0.9)
+
+    best_mri_model_wts = copy.deepcopy(model.mri.state_dict())
+    best_pet_model_wts = copy.deepcopy(model.pet.state_dict())
+    mri_best_acc = 0.0
+    pet_best_acc = 0.0
 
     for epoch in range(num_epochs):
         print('Epoch {}'.format(epoch+1))
+        print('-'*20)
 
         for phase in ['train', 'val']:
 
@@ -128,95 +139,95 @@ def train(model, criterion, optimizer, dataloader, num_epochs=100):
             else:
                 model.eval()
 
-            running_loss = 0.0
-            running_corrects = 0.0
+            mri_running_loss = 0.0
+            mri_running_corrects = 0.0
 
-            for batch_idx, (inputs, labels) in enumerate(dataloader[phase]):
+            pet_running_loss = 0.0
+            pet_running_corrects = 0.0            
+
+            for batch_idx, subject in enumerate(dataloader[phase]):
                 
-                inputs = inputs.to(device)
-                labels = labels.to(device)
+                mri_in, pet_in, labels = subject['mri'].to(device), subject['pet'].to(device), subject['class'].to(device)
 
-                optimizer.zero_grad()
+                mri_optimizer.zero_grad()
+                pet_optimizer.zero_grad()
 
                 with torch.set_grad_enabled(phase=='train'):
-                    outputs = model(inputs)
-                    _, preds = torch.max(outputs, 1)
-                    loss = criterion(outputs, labels)
+                    mri_out, pet_out = model(mri_in, pet_in)
+                    _, mri_preds = torch.max(mri_out, 1)
+                    _, pet_preds = torch.max(pet_out, 1)
+                    mri_loss, pet_loss = criterion(mri_out, labels), criterion(pet_out, labels)
 
                     if phase == 'train':
-                        loss.backward()
-                        optimizer.step()
+                        mri_loss.backward()
+                        mri_optimizer.step()
+
+                        pet_loss.backward()
+                        pet_optimizer.step()
                 
-                running_loss += loss.item() * inputs.size(0)
-                running_corrects += torch.sum(preds == labels)
+                mri_running_loss += mri_loss.item() * mri_in.size(0)
+                mri_running_corrects += torch.sum(mri_preds == labels)
+
+                pet_running_loss += pet_loss.item() * pet_in.size(0)
+                pet_running_corrects += torch.sum(pet_preds == labels)
                 #print('Batch {} done...'.format(batch_idx))
 
-            epoch_loss = running_loss / dataset_sizes[phase]*100
-            epoch_acc = running_corrects.double() / dataset_sizes[phase]*100
+            mri_epoch_loss = mri_running_loss / dataset_sizes[phase]*100
+            mri_epoch_acc = mri_running_corrects.double() / dataset_sizes[phase]*100
 
-            print('{} Loss: {:.4f} Acc: {:.4f}'.format(phase, epoch_loss, epoch_acc))
+            pet_epoch_loss = pet_running_loss / dataset_sizes[phase]*100
+            pet_epoch_acc = pet_running_corrects.double() / dataset_sizes[phase]*100
 
-            if phase == 'val' and epoch_acc > best_acc:
-                best_acc = epoch_acc
-                best_model_wts = copy.deepcopy(model.state_dict())
+            print('Mri {} Loss: {:.4f} Acc: {:.4f}'.format(phase, mri_epoch_loss, mri_epoch_acc))
+            print('Pet {} Loss: {:.4f} Acc: {:.4f}'.format(phase, pet_epoch_loss, pet_epoch_acc))
+
+            if phase == 'val' and mri_epoch_acc > mri_best_acc:
+                mri_best_acc = mri_epoch_acc
+                mri_best_model_wts = copy.deepcopy(model.mri.state_dict())
+
+            if phase == 'val' and pet_epoch_acc > pet_best_acc:
+                pet_best_acc = pet_epoch_acc
+                pet_best_model_wts = copy.deepcopy(model.pet.state_dict())
     
     print()
     time_elapsed = time.time() - since
     print('Training complete in {:.0f}m {:.0f}s'.format(time_elapsed // 60, time_elapsed % 60))
-    print('Best val Acc: {:.4f}'.format(best_acc))
+    print('Best Mri val Acc: {:.4f}'.format(mri_best_acc))
+    print('Best Pet val Acc: {:.4f}'.format(pet_best_acc))
     print()
 
-    model.load_state_dict(best_model_wts)
+    model.mri.load_state_dict(mri_best_model_wts)
+    model.pet.load_state_dict(pet_best_model_wts)
+
+    torch.save(model, model_destination)
+
     return model
 
-def extract_features(model, dataloader, mode):
-    model = model.eval()
-    
-    if not Path('./features').is_dir():
-        os.mkdir(Path('./features'))
-
+def trained_feature_extraction(model, dataloader): 
+    model.feature_extractor_mode()
+    model = model.to(device).eval()
+    features = defaultdict(list)
     with torch.no_grad():
-        for phase in ['train', 'val', 'test']:
-            print(f"Extracting {mode} {phase} features")
-            for idx, batch in enumerate(dataloader[phase]):
-               
-                inputs, _ = batch
-                inputs = inputs.to(device)
-                outputs = model(inputs)
+        for idx, batch in enumerate(dataloader, start=1):               
+            mri_inputs, pet_inputs = batch["mri"].to(device), batch["pet"].to(device)
+            mri_outputs, pet_outputs = model.mri(mri_inputs), model.pet(pet_inputs)
 
-                if idx == 0:
-                    features = outputs
-                    continue
+            print(f'Batch: {idx:03d}, Mri shape: {mri_outputs.shape}, Pet shape: {pet_outputs.shape}')
 
-                features = torch.cat((features, outputs), 0)
+            features['mri'].append(mri_outputs.squeeze().cpu())
+            features['pet'].append(pet_outputs.squeeze().cpu())
+            features['class'].append(batch["class"])
+    
+    print(f'Saving to, {destination_dir} ...')
+    features = { mode: torch.cat(feats, dim=0) for mode, feats in features.items() }
 
-            print(f'{mode}: {features.shape}')
-            print("Saving features in file...")
-            if args.training:
-                if not Path('./features/trained').is_dir():
-                    os.mkdir(Path('./features/trained'))
-                torch.save(features, Path('./features/trained/' + mode + '-' + phase + '-features.pt'))
-            else:
-                if not Path('./features/not_trained').is_dir():
-                    os.mkdir(Path('./features/not_trained'))            
-                torch.save(features, Path('./features/not_trained/' + mode + '-' + phase + '-features.pt'))
-            print("File Saved")
+    print(f"Mri features: {features['mri'].shape} Pet features: {features['pet'].shape} Labels: {features['class'].shape}")
+    torch.save(features['mri'], os.path.join(destination_dir, 'trained_mri_features.pt'))
+    torch.save(features['pet'], os.path.join(destination_dir, 'trained_pet_features.pt'))
+    torch.save(features['class'], os.path.join(destination_dir, 'trained_labels.pt'))
+    print('Trained features have been extracted and saved!')
 
-def serialize_labels():
-    print("Concat the labels")
-    for phase in ['train', 'val', 'test']:
-        for idx, (_, labels) in enumerate(mri_dataloader[phase]):
-
-            if idx == 0:
-                acc = labels
-                continue
-
-            acc = torch.cat((acc,labels), 0)       
-
-        print(f'Labels: {acc.shape}')
-        print("Saving labels in file...")
-        torch.save(acc, Path('./features/' + phase + '-labels.pt'))
-        print("File Saved")
+device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
 transform = transforms.Compose(
     [
@@ -224,62 +235,47 @@ transform = transforms.Compose(
         transforms.ToTensor()
     ])
 
-mri_dataset = AdniDataset(args.caps, mode='mri', transform=transform)
-pet_dataset = AdniDataset(args.caps, mode='pet', transform=transform)
+print("Loading Dataset...")
+adni_dataset = ADNI(args.tsv, args.data, transform=transform)
+print(f'Adni dataset has {len(adni_dataset)} samples')
 
-train_size = int(0.6*len(mri_dataset))
-val_size = test_size = int(0.2*len(mri_dataset))
-
-torch.manual_seed(42)
-mri_trainset, mri_valset, mri_testset = random_split(mri_dataset, [train_size,val_size,test_size])
-
-torch.manual_seed(42)
-pet_trainset, pet_valset, pet_testset = random_split(pet_dataset, [train_size,val_size,test_size])
-
+train_size = int(0.6*len(adni_dataset))
+val_size = test_size = int(0.2*len(adni_dataset))
 dataset_sizes = {'train': train_size, 'val': val_size, 'test': test_size}
 
-mri_dataloader = {
-            'train': DataLoader(mri_trainset, batch_size=128),
-            'val': DataLoader(mri_valset, batch_size=128),
-            'test': DataLoader(mri_testset, batch_size=128)
+print(f"Training size: {dataset_sizes['train']} | Validation size: {dataset_sizes['val']} | Testing size: {dataset_sizes['test']}")
+
+torch.manual_seed(42)
+adni_trainset, adni_valset, adni_testset = random_split(adni_dataset, dataset_sizes.values())
+
+adni_dataloaders = {
+            'train': DataLoader(adni_trainset, batch_size=128),
+            'val': DataLoader(adni_valset, batch_size=128),
+            'test': DataLoader(adni_testset, batch_size=128)
 }
 
-pet_dataloader = {
-            'train': DataLoader(pet_trainset, batch_size=128),
-            'val': DataLoader(pet_valset, batch_size=128),
-            'test': DataLoader(pet_testset, batch_size=128)
-}
+# from sklearn.model_selection import StratifiedShuffleSplit
+# from sklearn.model_selection import cross_val_score, cross_val_predict
+# from sklearn.metrics import confusion_matrix, classification_report, accuracy_score
+# from sklearn.svm import LinearSVC
 
-device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
-mri_model = models.resnet18(pretrained=True, progress=True)
-pet_model = models.resnet18(pretrained=True, progress=True)
+# print("Classifying...")
+# clf = LinearSVC(dual=False) # number of samples greater than the features so dual needs to be false as per scikits docs
+# cv = StratifiedShuffleSplit(n_splits=10, test_size=0.2)
+# #TODO corss val predict is not working becuase it only works on partitions?? Try stratified kfold instead 
 
-num_ftrs = mri_model.fc.in_features
-mri_model.fc = nn.Linear(num_ftrs, 4)
-pet_model.fc = nn.Linear(num_ftrs, 4)
+# scores = cross_val_score(clf, features, labels, cv=cv)
 
-if args.training:
+# print("Accuracy: %0.2f (+/- %0.2f)" % (scores.mean(), scores.std() * 2))
 
-    mri_model = mri_model.to(device)
-    pet_model = pet_model.to(device)
-    
-    criterion = nn.CrossEntropyLoss()
-    mri_optimizer = optim.Adam(mri_model.parameters())
-    pet_optimizer = optim.Adam(pet_model.parameters())
+# extract_features(mri_model, mri_dataloader, 'mri')
+# extract_features(pet_model, pet_dataloader, 'pet')
+# serialize_labels()
 
-    mri_model = train(mri_model, criterion, mri_optimizer, mri_dataloader, num_epochs=25)
-    pet_model = train(pet_model, criterion, pet_optimizer, pet_dataloader, num_epochs=25)
-
-mri_model = nn.Sequential( *list(mri_model.children())[:-1] )
-mri_model = mri_model.to(device)
-pet_model = nn.Sequential( *list(pet_model.children())[:-1] )  
-pet_model = pet_model.to(device)
-
-extract_features(mri_model, mri_dataloader, 'mri')
-extract_features(pet_model, pet_dataloader, 'pet')
-serialize_labels()
-
+naive_feature_extraction( DataLoader(ConcatDataset([adni_trainset, adni_valset, adni_testset]), batch_size=128) )
+trained_model = train_multimodal(adni_dataloaders, num_epochs=1)
+trained_feature_extraction( trained_model, DataLoader(ConcatDataset([adni_trainset, adni_valset, adni_testset]), batch_size=128) )  
 
 
 

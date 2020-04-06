@@ -11,42 +11,36 @@ from numpy.random import default_rng
 
 
 parser = argparse.ArgumentParser(description='Create a subset of data basing slices off entropy significance.')
+parser.add_argument('dataset_root', metavar='DIR', help='Folder that contains the dataset you want to use')
 parser.add_argument('threshold', type=int, help='The amount of important slices you want from the volume')
-parser.add_argument('--random', default=False, action='store_true', help='Enable this to use for random slice indexing instead of entropy')
+
 args = parser.parse_args()
-
-dataset_root = "F:/caps/subjects/"
-
-if args.random:
-    master_root = "F:/temp/" + "random_" + str(args.threshold)
-else:
-    master_root = "F:/temp/" + "entropy_" + str(args.threshold)
-
-print("Images will be store in", master_root)
 
 def get_image(path):
     img = nib.load(path) #nii file type medical image
     return img.get_fdata() #Converted to a numpy array type
     
-def shannon(image):
+def shannon_max(image):
     entropies = [ (shannon_entropy(image[:,i,:]), i) for i in range(image.shape[1]) ]
     entropies = sorted(entropies, key=lambda x: x[0], reverse=True)
-    return list(zip(*entropies[:args.threshold]))
+    return list(list(zip(*entropies[:args.threshold]))[1])
 
-def random_entropy(num_slices):
+def shannon_split_extreme(image):
+    entropies = [ (shannon_entropy(image[:,i,:]), i) for i in range(image.shape[1]) ]
+    entropies = sorted(entropies, key=lambda x: x[0], reverse=True)
+    return list(list(zip(*(entropies[:args.threshold//2] + entropies[-args.threshold//2:])))[1])
+
+def shannon_split_weak(image):
+    entropies = [ (shannon_entropy(image[:,i,:]), i) for i in range(image.shape[1]) ]
+    entropies = sorted(entropies, key=lambda x: x[0], reverse=True)
+    return list(list(zip(*(entropies[args.threshold//2:args.threshold] + entropies[-args.threshold//2:-args.threshold:-1])))[1])
+
+def random_entropy(image):
     rng = default_rng() #Need this for non replcement of ints 
-    return list(rng.choice(num_slices, size=args.threshold, replace=False)) 
+    return list(rng.choice(image.shape[1] - 1, size=args.threshold, replace=False)) 
 
-def save_images(mri_destination, pet_destination, mri_image_path, pet_image_path):
+def save_images(mri_destination, pet_destination, mri_image, pet_image, indicies):
    
-    mri_image = get_image(mri_image_path)
-    pet_image = get_image(pet_image_path)
-
-    if args.random:
-        indicies = random_entropy(mri_image.shape[1] - 1) #145 slices remember to sub 1 for indicies
-    else:
-        indicies = list(shannon(mri_image)[1])
-
     for sli in indicies:
         mri_temp = mri_image[:,sli,:]
         pet_temp = pet_image[:,sli,:]
@@ -83,11 +77,11 @@ def get_paths(dataset_root):
 
     return join_subject_lists(mri_subjects, pet_subjects)
 
-def create_subject_dir(subject):
+def create_subject_dir(subject, root):
 
     sub_id, session, _, _ = subject
-    new_mri_path = os.path.join(master_root, sub_id, session, 'mri')
-    new_pet_path = os.path.join(master_root, sub_id, session, 'pet')
+    new_mri_path = os.path.join(root, sub_id, session, 'mri')
+    new_pet_path = os.path.join(root, sub_id, session, 'pet')
 
     if not os.path.exists(new_mri_path):
         os.makedirs(new_mri_path)
@@ -98,11 +92,26 @@ def create_subject_dir(subject):
     return new_mri_path, new_pet_path
 
 def main():
-    subjects = get_paths(dataset_root)
-    for subject in subjects:
-        mri_path, pet_path = create_subject_dir(subject)
-        save_images(mri_path, pet_path, subject[2], subject[3])
+    subjects = get_paths(args.dataset_root) 
+
+    subsets = [ ("data/entropy_" + str(args.threshold), shannon_max),
+                ("data/random_" + str(args.threshold), random_entropy),
+                ("data/extreme_split_" + str(args.threshold), shannon_split_extreme),
+                ("data/weak_split_" + str(args.threshold), shannon_split_weak) ]
+
+    for subj_root, fn in subsets:
+
+        print("Images will be store in", subj_root)            
+        for subject in subjects:
+            new_mri_path, new_pet_path = create_subject_dir(subject, subj_root)
+
+            mri_image = get_image(subject[2])
+            pet_image = get_image(subject[3])
+
+            indicies = fn(mri_image)
+            
+            save_images(new_mri_path, new_pet_path, mri_image, pet_image, indicies)
 
 main()
 print()
-print("Finished Creating Subset!")
+print("Finished Creating Subsets!")
