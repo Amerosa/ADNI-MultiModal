@@ -1,5 +1,5 @@
 import torch
-from torch.utils.data import DataLoader, random_split
+from torch.utils.data import DataLoader, random_split, TensorDataset
 import torch.nn as nn
 import torch.nn.functional as F
 import torch.optim as optim
@@ -7,11 +7,15 @@ import time
 import copy
 import argparse
 from pathlib import Path
+import os 
+from sklearn.svm import LinearSVC
+from sklearn.model_selection import cross_val_score, cross_val_predict, StratifiedShuffleSplit
+import csv
 
 device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
 class TensorDataset(torch.utils.data.TensorDataset):
-    def __init__(self, mri_features, pet_features, labels):
+    def __init__(self, naive_features, trained_features, labels):
         super(TensorDataset).__init__()
         self.mri = mri_features.squeeze() #[samples x features x 1 x 1] => [samples x features]
         self.pet = pet_features.squeeze() 
@@ -43,118 +47,38 @@ naive_clf = nn.Sequential(
             nn.Linear(512,4)           
 )
 
-naive_clf.to(device)
+def classify(feature_dict):
+    clf = LinearSVC(dual=False)
+    cv = StratifiedShuffleSplit(n_splits=3, test_size=0.2)
+    scores = cross_val_score(clf, 
+                        torch.cat( (feature_dict['mri'], feature_dict['pet']), dim=1).numpy(), 
+                        feature_dict['class'].numpy(), 
+                        cv=cv)
+    return scores.mean(), scores.std()
 
-criterion = nn.CrossEntropyLoss()
-optimizer = optim.Adam(naive_clf.parameters(), lr=0.001, weight_decay=0.01)
 
-def train(model, criterion, optimizer, num_epochs=25):
-    since = time.time()
-    best_model_wts = copy.deepcopy(model.state_dict())
-    best_acc = 0.0
 
-    for epoch in range(num_epochs):
-        print(f'Epoch: {epoch+1}')
-        for phase in ['train', 'val']:
 
-            running_loss = 0.0
-            running_corrects = 0.0
+#print( torch.cat( (naive_features['mri'], naive_features['pet']), dim=1 ).numpy() )
 
-            for batch_idx, (inputs,labels) in enumerate(dataloaders[phase]):    
-                
-                #inputs = torch.t(inputs)
-                inputs = inputs.to(device)
-                #labels = labels.squeeze(1)
-                labels = labels.to(device)
+with open('results.csv', mode='w') as results_file:
+    results_writer = csv.writer(results_file, delimiter=',', quotechar='"', quoting=csv.QUOTE_MINIMAL)
 
-                optimizer.zero_grad()
+    for experiment in ['entropy_30', 'random_30', 'extreme_split_30', 'weak_split_30']:
+        
+        feature_dir = os.path.join('features', experiment)
+        
+        naive_features = {'mri': torch.load(os.path.join(feature_dir, 'naive_mri_features.pt')),
+                    'pet': torch.load(os.path.join(feature_dir, 'naive_pet_features.pt')),
+                    'class': torch.load(os.path.join(feature_dir, 'naive_labels.pt'))
+                    }
 
-                with torch.set_grad_enabled(phase == 'train'):
-                    #print(inputs.shape)
-                    #print(labels.shape)
-                    outputs = model(inputs)
-                    #print(outputs.shape)
-                    #outputs = outputs.reshape((outputs.size(0), 4))
-                    #print(outputs.shape)
-                    #print(labels.shape)
-                    _, preds = torch.max(outputs, 1)
-                    #print(preds.shape)
-                    #preds = preds.reshape(-1)
-                    #print(outputs)
-                    #print(preds.shape)
-                    #print(preds)
-                    #print(vals)
-                    loss = criterion(outputs, labels)
-                
-                    if phase == 'train':
-                        loss.backward()
-                        optimizer.step()
+        trained_features = {'mri': torch.load(os.path.join(feature_dir, 'trained_mri_features.pt')),
+                    'pet': torch.load(os.path.join(feature_dir, 'trained_pet_features.pt')),
+                    'class': torch.load(os.path.join(feature_dir, 'trained_labels.pt'))
+                    }
 
-                running_loss += loss.item() * inputs.size(0)
-                running_corrects += torch.sum(preds == labels)
-            
-            epoch_loss = running_loss / dataset_sizes[phase]
-            epoch_acc = running_corrects / dataset_sizes[phase]
+        results_writer.writerow([experiment, 'naive', 'cat', *classify(naive_features)])
+        results_writer.writerow([experiment, 'trained', 'cat', *classify(trained_features)])
 
-            print('{} Loss: {:.4f} Acc: {:.4f}'.format(phase, epoch_loss, epoch_acc*100))
-
-            if phase == 'val' and epoch_acc > best_acc:
-                best_acc = epoch_acc
-                best_model_wts = copy.deepcopy(model.state_dict())
-    
-    print()
-    time_elapsed = time.time() - since
-    print('Training completed in {:.0f}m {:0f}s'.format(time_elapsed // 60, time_elapsed % 60))
-    print('Best val acc: {:.4f}'.format(best_acc*100))
-
-    model.load_state_dict(best_model_wts)
-    
-    return model
-
-def testing(model):
-    running_corrects = 0.0
-    with torch.no_grad():
-        for batch_idx, (inputs, labels) in enumerate(dataloaders['test']):
-            #inputs = inputs.transpose(1,3)
-            inputs = inputs.to(device)
-            labels = labels.to(device)
-            outputs = model(inputs)
-            #outputs = outputs.reshape((outputs.size(0), 4))
-            _, preds = torch.max(outputs, 1)
-
-            running_corrects += torch.sum(preds == labels)
-            #print(running_corrects)
-    print()
-    print('Test Acc: {:.4f} '.format( (running_corrects / dataset_sizes['test'])*100 ))
-
-#print(dataset_sizes['test'])
-#trained_model = train(net, criterion, optimizer, 100)
-#torch.save(trained_model, 'features/baseline.pt')
-#testing(trained_model)
-parser = argparse.ArgumentParser()
-parser.add_argument('features', metavar='DIR', help='Directory of the feature tensors extracted')
-parser.add_argument('labels', metavar='DIR', help='Directory of the labels')
-
-args = parser.parse_args()
-ft_dir = Path(args.features)
-lb_dir = Path(args.labels)
-dataloaders = {}
-
-#TODO Super messy way to load all the data, may need to fix this in the future!
-train_set = TensorDataset(torch.load(ft_dir / 'mri-train-features.pt'), torch.load(ft_dir / 'pet-train-features.pt'), torch.load(lb_dir / 'train-labels.pt') )
-val_set   = TensorDataset(torch.load(ft_dir / 'mri-val-features.pt'), torch.load(ft_dir / 'pet-val-features.pt'), torch.load(lb_dir / 'val-labels.pt') )
-test_set  = TensorDataset(torch.load(ft_dir / 'mri-test-features.pt'), torch.load(ft_dir / 'pet-test-features.pt'), torch.load(lb_dir / 'test-labels.pt') )
-
-dataset_sizes = { 'train': len(train_set), 'val'  : len(val_set), 'test' : len(test_set) }
-
-dataloaders = {
-                'train' : DataLoader(train_set, batch_size=128, shuffle=False),
-                'val' : DataLoader(val_set, batch_size=128, shuffle=False),
-                'test' : DataLoader(test_set, batch_size=128, shuffle=False)
-}
-
-#sample, label = next(iter(dataloaders['test']))
-#print(sample.shape, label.shape)
-
-trained_model = train(naive_clf, criterion, optimizer, 100)
-testing(trained_model)
+#print("Accuracy: %0.2f (+/- %0.2f)" % (scores.mean(), scores.std() * 2))

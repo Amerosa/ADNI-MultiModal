@@ -274,7 +274,7 @@ adni_dataloaders = {
 # serialize_labels()
 
 naive_feature_extraction( DataLoader(ConcatDataset([adni_trainset, adni_valset, adni_testset]), batch_size=128) )
-trained_model = train_multimodal(adni_dataloaders, num_epochs=1)
+trained_model = train_multimodal(adni_dataloaders, num_epochs=25)
 trained_feature_extraction( trained_model, DataLoader(ConcatDataset([adni_trainset, adni_valset, adni_testset]), batch_size=128) )  
 
 
